@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Model Interaction</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Use the Inter font */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-200 min-h-screen flex items-center justify-center p-4">
+
+    <div class="bg-gray-800 p-8 rounded-lg shadow-xl w-full max-w-2xl">
+        <h1 class="text-3xl font-bold mb-6 text-center text-cyan-400">Decoder Only Transformer</h1>
+        
+        <!-- Output Display Area -->
+        <div class="mt-6">
+            <label class="block text-sm font-medium text-gray-400 mb-2">Result:</label>
+            <div
+                id="output-area"
+                class="w-full p-4 bg-gray-900 rounded-md min-h-[200px] text-gray-300 whitespace-pre-wrap border border-gray-700"
+            >
+                
+            </div>
+        </div>
+
+        <!-- Text Input Area -->
+        <label for="prompt-input" class="block text-sm font-medium text-gray-200 mb-2 mt-4">Prompt:</label>
+        <textarea
+            id="prompt-input"
+            rows="2"
+            class="w-full p-3 bg-gray-700 border border-gray-600 rounded-md text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+            placeholder="The story begins..."
+        ></textarea>
+
+        <!-- Buttons -->
+        <div class="flex gap-4 mt-4">
+            <button
+                id="finish-btn"
+                class="flex-1 bg-cyan-600 hover:bg-cyan-700 text-white font-semibold py-3 px-4 rounded-md shadow-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 focus:ring-offset-gray-800"
+            >
+                Finish Text
+            </button>
+            <button
+                id="eval-btn"
+                class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-4 rounded-md shadow-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-gray-800"
+            >
+                Evaluate Model
+            </button>
+        </div>
+
+    </div>
+
+    <script>
+        // Get references to the HTML elements
+        const promptInput = document.getElementById('prompt-input');
+        const finishBtn = document.getElementById('finish-btn');
+        const evalBtn = document.getElementById('eval-btn');
+        const outputArea = document.getElementById('output-area');
+
+        // Define the backend server URL
+        const API_URL = 'http://127.0.0.1:8000/api';
+
+        // Helper function to show loading state
+        function showLoading(btn, message = "Loading...") {
+            btn.disabled = true;
+            btn.dataset.originalText = btn.textContent;
+            btn.textContent = message;
+        }
+
+        // Helper function to reset button state
+        function resetButton(btn) {
+            btn.disabled = false;
+            btn.textContent = btn.dataset.originalText;
+        }
+
+        // --- Event Handler for 'Finish Text' ---
+        async function handleGenerate() {
+            let prompt = promptInput.value;
+            if (!prompt) {
+                prompt = "The";
+            }
+
+            showLoading(finishBtn, "Generating...");
+            outputArea.textContent = 'Generating... please wait.';
+
+            try {
+                // For GET requests, send prompt as URL parameter
+                const url = `${API_URL}/finishtext?prompt=${encodeURIComponent(prompt)}`;
+                console.log('Request URL:', url);
+                
+                const response = await fetch(url, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                });
+
+                console.log('Response status:', response.status);
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP error! status: ${response.status}, details: ${errorText}`);
+                }
+
+                const data = await response.json();
+                console.log('Response data:', data);
+                
+                outputArea.textContent = data.generated_text || data.message || data.error || 'No response generated';
+
+            } catch (error) {
+                console.error('Error during generation:', error);
+                outputArea.textContent = `Error: ${error.message}\n\nMake sure:\n- Django server is running on port 8000\n- Backend endpoints are correct`;
+            } finally {
+                resetButton(finishBtn);
+            }
+        }
+
+        // --- Event Handler for 'Evaluate Model' ---
+        async function handleEvaluate() {
+            showLoading(evalBtn, "Evaluating...");
+            outputArea.textContent = 'Evaluating model... this may take a moment.';
+
+            try {
+                const response = await fetch(`${API_URL}/evaluate`, {
+                    method: 'GET',
+                });
+
+                console.log('Response status:', response.status);
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP error! status: ${response.status}, details: ${errorText}`);
+                }
+
+                const data = await response.json();
+                console.log('Response data:', data);
+                
+                // Format the output
+                if (data.perplexity !== undefined) {
+                    outputArea.textContent = `--- Model Evaluation ---\n\nPerplexity: ${data.perplexity}\nLoss: ${data.loss}\n\n${data.note || data.message || 'Evaluation completed'}`;
+                } else {
+                    outputArea.textContent = data.message || data.error || JSON.stringify(data);
+                }
+
+            } catch (error) {
+                console.error('Error during evaluation:', error);
+                outputArea.textContent = `Error: ${error.message}\n\nMake sure:\n- Django server is running on port 8000\n- Backend endpoints are correct`;
+            } finally {
+                resetButton(evalBtn);
+            }
+        }
+
+        // Attach the event listeners to the buttons
+        finishBtn.addEventListener('click', handleGenerate);
+        evalBtn.addEventListener('click', handleEvaluate);
+
+        // Test connection on page load
+        async function testConnection() {
+            try {
+                const response = await fetch(`${API_URL}/evaluate`);
+                if (response.ok) {
+                    console.log('Backend connection successful');
+                } else {
+                    console.log('Backend connection failed');
+                }
+            } catch (error) {
+                console.log('Backend connection failed:', error.message);
+            }
+        }
+
+        // Test connection when page loads
+        testConnection();
+    </script>
+</body>
+</html>

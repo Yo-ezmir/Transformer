@@ -3,29 +3,59 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+# Corpus used for evaluation batches (must be encoded with the *same* stoi as training)
 with open('/home/yon/Transformer/data/train.csv', 'r', encoding='utf-8') as f:
     text = f.read()
-
-
-with open('/home/yon/Transformer/data/train.csv', 'r', encoding='utf-8') as f:
-    text += f.read()
-
 with open('/home/yon/Transformer/data/test.csv', 'r', encoding='utf-8') as f:
     text += f.read()
 
+PATH = '/home/yon/Transformer/model/decoder_model3.pth'
 
-chars = sorted(list(set(text)))
-vocab_size = len(chars) + 1
-stoi = { ch:i for i,ch in enumerate(chars) }
-itos = { i:ch for i,ch in enumerate(chars) }
-encode = lambda s: [stoi[c] for c in s]
-decode = lambda l: ''.join([itos[i] for i in l])
+# Filled from checkpoint so indices always match decoder_model3.pth (do not rebuild from files)
+chars = []
+stoi = {}
+itos = {}
+vocab_size = 0
+encode = None
+decode = None
+data = None
+train_data = None
+val_data = None
 
-data = torch.tensor(encode(text), dtype=torch.long)
-n = int(0.9*len(data)) 
-train_data = data[:n]
-val_data = data[n:]
 
+def _sync_vocab_from_checkpoint(path=None):
+    """Load stoi/itos/chars from the checkpoint and re-encode ``text`` for val batches."""
+    global chars, stoi, itos, vocab_size, encode, decode, data, train_data, val_data
+    path = path or PATH
+    ckpt = torch.load(path, map_location='cpu', weights_only=False)
+    chars = list(ckpt['chars'])
+    stoi = dict(ckpt['stoi'])
+    raw_itos = ckpt['itos']
+    itos = {int(k): v for k, v in raw_itos.items()}
+    vocab_size = int(ckpt['vocab_size'])
+
+    def _encode(s):
+        out = []
+        for c in s:
+            if c not in stoi:
+                raise ValueError(
+                    f"Character {c!r} is not in the model vocabulary (trained on Shakespeare chars)."
+                )
+            out.append(stoi[c])
+        return out
+
+    def _decode(indices):
+        return ''.join(itos[int(i)] for i in indices)
+
+    encode = _encode
+    decode = _decode
+    data = torch.tensor(encode(text), dtype=torch.long)
+    n = int(0.9 * len(data))
+    train_data = data[:n]
+    val_data = data[n:]
+
+
+_sync_vocab_from_checkpoint()
 
 batch_size = 16
 block_size = 32
@@ -43,30 +73,18 @@ dropout = 0.0
 def get_batch(split):
     data = train_data if split == 'train' else val_data
     ix = torch.randint(len(data) - block_size, (batch_size,))
-    x = torch.stack([data[i:i+block_size] for i in ix])
-    y = torch.stack([data[i+1:i+block_size+1] for i in ix])
+    x = torch.stack([data[i:i + block_size] for i in ix])
+    y = torch.stack([data[i + 1:i + block_size + 1] for i in ix])
     x, y = x.to(device), y.to(device)
     return x, y
 
-@torch.no_grad()
-def estimate_loss():
-    out = {}
-    model.eval()
-    for split in ['train', 'val']:
-        losses = torch.zeros(eval_iters)
-        for k in range(eval_iters):
-            X, Y = get_batch(split)
-            logits, loss = model(X, Y)
-            losses[k] = loss.item()
-        out[split] = losses.mean()
-    model.train()
-    return out
 
 def mask(tensor, T, C):
-  matrix = torch.zeros(1, T, C)
-  mask = torch.triu(torch.ones_like(matrix[0, :, :]), diagonal=1)
-  matrix.masked_fill_(mask.bool(), float('-inf'))
-  return tensor + matrix
+    matrix = torch.zeros(1, T, C)
+    mask = torch.triu(torch.ones_like(matrix[0, :, :]), diagonal=1)
+    matrix.masked_fill_(mask.bool(), float('-inf'))
+    return tensor + matrix
+
 
 class Head(nn.Module):
 
@@ -80,11 +98,11 @@ class Head(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
-        B,T,C = x.shape
+        B, T, C = x.shape
 
         k = self.key(x)
         q = self.query(x)
-        attention_score = q @ k.transpose(-2,-1) * C**-0.5
+        attention_score = q @ k.transpose(-2, -1) * C ** -0.5
         attention_score = attention_score.masked_fill(self.tril[:T, :T] == 0, float('-inf'))
         attention_score = F.softmax(attention_score, dim=-1)
         attention_score = self.dropout(attention_score)
@@ -92,6 +110,7 @@ class Head(nn.Module):
         v = self.value(x)
         attention = attention_score @ v
         return attention
+
 
 class MultiHeadAttention(nn.Module):
 
@@ -106,6 +125,7 @@ class MultiHeadAttention(nn.Module):
         out = self.dropout(self.projection(out))
         return out
 
+
 class FeedFoward(nn.Module):
 
     def __init__(self, n_embd):
@@ -119,6 +139,7 @@ class FeedFoward(nn.Module):
 
     def forward(self, x):
         return self.net(x)
+
 
 class Block(nn.Module):
 
@@ -135,6 +156,7 @@ class Block(nn.Module):
         x = x + self.ffwd(self.linearLayer2(x))
         return x
 
+
 class DecodOnlyTransformer(nn.Module):
 
     def __init__(self):
@@ -149,7 +171,7 @@ class DecodOnlyTransformer(nn.Module):
         B, T = token.shape
         token_emb = self.token_embedding(token)
         position_emb = self.position_embedding(torch.arange(T, device=device))
-        x = token_emb + position_emb 
+        x = token_emb + position_emb
 
         x = self.blocks(x)
         x = self.layernorm_f(x)
@@ -159,8 +181,8 @@ class DecodOnlyTransformer(nn.Module):
             loss = None
         else:
             B, T, C = logits.shape
-            logits = logits.view(B*T, C)
-            targets = targets.view(B*T)
+            logits = logits.view(B * T, C)
+            targets = targets.view(B * T)
             loss = F.cross_entropy(logits, targets)
 
         return logits, loss
@@ -175,24 +197,9 @@ class DecodOnlyTransformer(nn.Module):
             token = torch.cat((token, token_next), dim=1)
         return token
 
-model = DecodOnlyTransformer()
-m = model.to(device)
-optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
-
-for iter in range(max_iters):
-    xb, yb = get_batch('train')
-    logits, loss = model(xb, yb)
-
-    optimizer.zero_grad(set_to_none=True)
-    loss.backward()
-    optimizer.step()
-
-PATH = '/home/yon/Transformer/model/decoder_model3.pth'
-
-
 
 def evaluate_model():
-    checkpoint = torch.load(PATH, map_location=device)
+    checkpoint = torch.load(PATH, map_location=device, weights_only=False)
     model = DecodOnlyTransformer()
     model.load_state_dict(checkpoint['model_state_dict'])
     model.to(device)
@@ -231,9 +238,7 @@ def evaluate_model():
 
 
 def generate_text(prompt="The", max_new_tokens=200):
-
-    PATH = '/home/yon/Transformer/model/decoder_model3.pth'
-    checkpoint = torch.load(PATH, map_location=device)
+    checkpoint = torch.load(PATH, map_location=device, weights_only=False)
     model = DecodOnlyTransformer()
     model.load_state_dict(checkpoint['model_state_dict'])
     m = model.to(device)

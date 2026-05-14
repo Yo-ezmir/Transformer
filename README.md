@@ -1,3 +1,5 @@
+**Author:** Yonatan Azmir | yonatanezmir@gmail.com
+
 # 🧠 Decoder-Only Transformer Web Interface
 
 This project implements a custom **Decoder-Only Transformer** (GPT from scratch) with support for **BOTH character-level and BERT tokenization**.
@@ -14,31 +16,30 @@ This project implements a custom **Decoder-Only Transformer** (GPT from scratch)
 - **Web Interface:** Clean UI with model selector dropdown
 - **PyTorch + Django Backend:** REST API for model inference
 
----
+
 
 ## 📁 Project Structure
-
+```
 Transformer/
-├── Transformer.ipynb ← Training notebook (run on Colab)
-├── requirements.txt ← Python dependencies
+├── Transformer.ipynb              # Training notebook (run on Colab)
+├── requirements.txt               # Python dependencies
 ├── data/
-│ └── tinyshakespeare.txt ← Training data
+│   └── tinyshakespeare.txt        # Training data
 ├── model/
-│ ├── decoder_model_bert.pth ← Trained BERT model
-│ └── decoder_model_character.pth ← Trained character model
-├── BE/ ← Django backend
-│ ├── manage.py
-│ ├── decoder_be/
-│ │ ├── settings.py
-│ │ └── urls.py
-│ └── transform/
-│ ├── views.py ← API endpoints
-│ ├── utils.py ← BERT tokenizer version
-│ └── utils1.py ← Character-level version
+│   ├── decoder_model_bert.pth     # Trained BERT model
+│   └── decoder_model_character.pth # Trained character model
+├── BE/                            # Django backend
+│   ├── manage.py
+│   ├── decoder_be/
+│   │   ├── settings.py
+│   │   └── urls.py
+│   └── transform/
+│       ├── views.py               # API endpoints
+│       ├── utils.py               # BERT tokenizer version
+│       └── utils1.py              # Character-level version
 └── FE/
-└── index.html ← Frontend UI
-
----
+    └── index.html                 # Frontend UI
+```
 
 ## 🚀 Setup
 

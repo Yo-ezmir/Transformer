@@ -6,73 +6,124 @@ This project implements a minimal, custom **Decoder-Only Transformer** (similar 
 
 ## 🌟 Features
 
-* **Autoregressive Text Generation:**  
+* **Autoregressive Text Generation:**
   Prompts the model with a starting phrase and generates a continuation of the text.
 
-* **Model Evaluation:**  
-  Provides an endpoint to calculate and display the model’s **perplexity** on a validation dataset.
+* **Model Evaluation:**
+  Provides an endpoint to calculate and display the model's **perplexity** on a validation dataset.
 
-* **Minimalist Interface:**  
+* **Minimalist Interface:**
   A clean, responsive web page allows easy interaction with the model.
 
-* **PyTorch Backend:**  
+* **PyTorch Backend:**
   The model runs securely on a **Python/PyTorch backend (DRF API)**.
 
 ---
 
 ## 🛠️ Project Structure
 
-This project is divided into three main components:
-### **1. The Transformer Implementation**
-
-The full implementation of the **Transformer Model** is in the notebook called Decoder_only_transformer.ipynb
-
-
-### **2. Backend (BE) — The Brain**
-
-The backend is a **DRF API** responsible for hosting the trained **PyTorch model** and handling all computation.
-
-* **`transform/views.py`:**  
-  The Django application that:  
-  - Loads the `decoder_model.pth` file  
-  - Defines the model architecture  
-  - Exposes two API endpoints:  
-    - `/finishtext` – for text generation  
-    - `/evaluate` – for model evaluation  
-
-* **`decoder_model.pth`:**  
-  This file contains the **saved weights (`state_dict`)** of the trained Transformer model.
-
-### **3.Frontend (FE) — The Interface**
-The frontend is a static HTML page that runs in the user's browser, handling the interface and communication with the backend API.
-
-index.html:
-A single file containing all HTML, Tailwind CSS, and JavaScript logic for the web application.
+```
+Transformer/
+├── Transformer.ipynb          ← Training notebook (run on Google Colab)
+├── requirements.txt           ← Python dependencies
+├── data/
+│   └── tinyshakespeare.txt    ← Training data
+├──     └──train.csv and test.csv
+├── model/
+│   └── decoder_model3.pth     ← Trained model weights (copied from Colab)
+├── BE/                        ← Django backend
+│   ├── manage.py
+│   ├── decoder_be/
+│   │   ├── settings.py
+│   │   └── urls.py
+│   └── transform/
+│       ├── views.py
+│       ├── utils.py           ← BERT tokenizer version
+│       └── utils1.py          ← Character-level version (active)
+└── FE/
+    └── index.html             ← Frontend (open directly in browser)
+```
 
 ---
 
-### 🚀 How to Run the Project
-This project requires two separate terminals to run the backend server and frontend interface simultaneously.
+## 🚀 Setup on Windows
 
-#### Start the Backend Server (BE)
-Open your first terminal, navigate to the BE directory, and run:
-```bash
+### Step 1 — Train the model on Google Colab
+
+1. Open `Transformer.ipynb` in [Google Colab](https://colab.research.google.com/)
+2. Upload `data/tinyshakespeare.txt` to your Google Drive under `MyDrive/data/`
+3. Run all cells — training takes a few minutes on Colab's free GPU
+4. Download the saved `decoder_model3.pth` file from your Google Drive
+5. Place it in the `model/` folder of this project
+
+### Step 2 — Create a virtual environment
+
+Open **PowerShell** or **Command Prompt** in the project root:
+
+```powershell
+python -m venv venv
+venv\Scripts\activate
+```
+
+### Step 3 — Install dependencies
+
+```powershell
+pip install -r requirements.txt
+```
+
+### Step 4 — Start the backend server
+
+```powershell
+cd BE
+python manage.py migrate
 python manage.py runserver
 ```
-Expected Output:
-Running on http://127.0.0.1:5000
 
-#### Access the Frontend (FE)
-Open your second terminal or simply open the file in your browser:
+The backend will be running at: `http://127.0.0.1:8000`
 
-```bash
-# macOS
-open FE/index.html
+### Step 5 — Open the frontend
 
-# Linux
-xdg-open FE/index.html
-
-# Windows (PowerShell)
-start FE/index.html
+Open a second terminal (or just use File Explorer) and open:
 
 ```
+FE/index.html
+```
+
+Double-click it to open in your browser, or in PowerShell:
+
+```powershell
+start FE\index.html
+```
+
+---
+
+## 🔌 API Endpoints
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/finishtext?prompt=The` | GET | Generate text from a prompt |
+| `/api/evaluate` | GET | Evaluate model perplexity on validation data |
+
+---
+
+## ⚠️ Notes
+
+* The `model/` folder must contain `decoder_model3.pth` before starting the backend
+* The backend uses `utils1.py` (character-level tokenizer) by default — check `views.py` if you want to switch to the BERT tokenizer version (`utils.py`)
+* Both backend and frontend must be running at the same time
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,129 +1,94 @@
 # 🧠 Decoder-Only Transformer Web Interface
 
-This project implements a minimal, custom **Decoder-Only Transformer** (similar to a small GPT) and exposes its functionality via a simple **web interface**.
+This project implements a custom **Decoder-Only Transformer** (GPT from scratch) with support for **BOTH character-level and BERT tokenization**.
 
 ---
 
 ## 🌟 Features
 
-* **Autoregressive Text Generation:**
-  Prompts the model with a starting phrase and generates a continuation of the text.
-
-* **Model Evaluation:**
-  Provides an endpoint to calculate and display the model's **perplexity** on a validation dataset.
-
-* **Minimalist Interface:**
-  A clean, responsive web page allows easy interaction with the model.
-
-* **PyTorch Backend:**
-  The model runs securely on a **Python/PyTorch backend (DRF API)**.
+- **Two Model Options:**
+  - Character-level (matches PDF, vocab_size=65)
+  - BERT subword tokenizer (better text quality, vocab_size=30k)
+- **Autoregressive Text Generation:** Generate text from any prompt
+- **Model Evaluation:** Calculate perplexity on validation data
+- **Web Interface:** Clean UI with model selector dropdown
+- **PyTorch + Django Backend:** REST API for model inference
 
 ---
 
-## 🛠️ Project Structure
+## 📁 Project Structure
 
-```
 Transformer/
-├── Transformer.ipynb          ← Training notebook (run on Google Colab)
-├── requirements.txt           ← Python dependencies
+├── Transformer.ipynb ← Training notebook (run on Colab)
+├── requirements.txt ← Python dependencies
 ├── data/
-│   └── tinyshakespeare.txt    ← Training data
-├──     └──train.csv and test.csv
+│ └── tinyshakespeare.txt ← Training data
 ├── model/
-│   └── decoder_model3.pth     ← Trained model weights (copied from Colab)
-├── BE/                        ← Django backend
-│   ├── manage.py
-│   ├── decoder_be/
-│   │   ├── settings.py
-│   │   └── urls.py
-│   └── transform/
-│       ├── views.py
-│       ├── utils.py           ← BERT tokenizer version
-│       └── utils1.py          ← Character-level version (active)
+│ ├── decoder_model_bert.pth ← Trained BERT model
+│ └── decoder_model_character.pth ← Trained character model
+├── BE/ ← Django backend
+│ ├── manage.py
+│ ├── decoder_be/
+│ │ ├── settings.py
+│ │ └── urls.py
+│ └── transform/
+│ ├── views.py ← API endpoints
+│ ├── utils.py ← BERT tokenizer version
+│ └── utils1.py ← Character-level version
 └── FE/
-    └── index.html             ← Frontend (open directly in browser)
-```
+└── index.html ← Frontend UI
 
 ---
 
-## 🚀 Setup on Windows
+## 🚀 Setup
 
-### Step 1 — Train the model on Google Colab
+### Step 1 — Train Models on Google Colab
 
-1. Open `Transformer.ipynb` in [Google Colab](https://colab.research.google.com/)
-2. Upload `data/tinyshakespeare.txt` to your Google Drive under `MyDrive/data/`
-3. Run all cells — training takes a few minutes on Colab's free GPU
-4. Download the saved `decoder_model3.pth` file from your Google Drive
-5. Place it in the `model/` folder of this project
+1. Open `Transformer.ipynb` in Google Colab
+2. Mount Google Drive and upload `tinyshakespeare.txt` to `MyDrive/data/`
+3. Set `MODEL_TYPE = "bert"` → Run all cells
+4. Set `MODEL_TYPE = "character"` → Run all cells again
+5. Download both `.pth` files from Drive
+6. Place them in the `model/` folder
 
-### Step 2 — Create a virtual environment
+### Step 2 — Create Virtual Environment
 
-Open **PowerShell** or **Command Prompt** in the project root:
-
-```powershell
+```bash
 python -m venv venv
-venv\Scripts\activate
+source venv/bin/activate  # Linux/Mac
+# or
+venv\Scripts\activate     # Windows
 ```
 
-### Step 3 — Install dependencies
+### Step 3 — Install Dependencies
 
-```powershell
+```bash
 pip install -r requirements.txt
 ```
 
-### Step 4 — Start the backend server
+### Step 4 — Run Backend
 
-```powershell
+```bash
 cd BE
-python manage.py migrate
 python manage.py runserver
 ```
 
-The backend will be running at: `http://127.0.0.1:8000`
+Backend runs at: [http://127.0.0.1:8000](http://127.0.0.1:8000)
 
-### Step 5 — Open the frontend
+### Step 5 — Open Frontend
 
-Open a second terminal (or just use File Explorer) and open:
-
-```
-FE/index.html
-```
-
-Double-click it to open in your browser, or in PowerShell:
-
-```powershell
-start FE\index.html
-```
-
----
+Open FE/index.html in your browser
 
 ## 🔌 API Endpoints
+GET /api/finishtext?prompt=The&model=bert → Generate text (parameters: prompt, model)
 
-| Endpoint | Method | Description |
-|---|---|---|
-| `/api/finishtext?prompt=The` | GET | Generate text from a prompt |
-| `/api/evaluate` | GET | Evaluate model perplexity on validation data |
-
----
+GET /api/evaluate?model=bert → Get perplexity (parameter: model)
 
 ## ⚠️ Notes
+Both models must be trained before running backend
 
-* The `model/` folder must contain `decoder_model3.pth` before starting the backend
-* The backend uses `utils1.py` (character-level tokenizer) by default — check `views.py` if you want to switch to the BERT tokenizer version (`utils.py`)
-* Both backend and frontend must be running at the same time
+Backend uses the model file matching the selected type
 
+Frontend lets you switch between BERT and Character models
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+Default hyperparameters: n_embd=128, n_layer=8, block_size=128, dropout=0.1

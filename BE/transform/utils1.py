@@ -3,117 +3,64 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-# Corpus used for evaluation batches (must be encoded with the *same* stoi as training)
-with open('/home/yon/Transformer/data/train.csv', 'r', encoding='utf-8') as f:
-    text = f.read()
-with open('/home/yon/Transformer/data/test.csv', 'r', encoding='utf-8') as f:
-    text += f.read()
+PATH = "/home/yon/Transformer/model/decoder_model_character.pth"
 
-PATH = '/home/yon/Transformer/model/decoder_model3.pth'
+# Try to load checkpoint, show error if not found
+try:
+    ckpt = torch.load(PATH, map_location='cpu', weights_only=False)
+except FileNotFoundError:
+    raise FileNotFoundError(f"Character model not found at {PATH}. Train it first with MODEL_TYPE='character'")
 
-# Filled from checkpoint so indices always match decoder_model3.pth (do not rebuild from files)
-chars = []
-stoi = {}
-itos = {}
-vocab_size = 0
-encode = None
-decode = None
-data = None
-train_data = None
-val_data = None
+# Check if this is actually a character model
+if 'chars' not in ckpt:
+    raise KeyError(f"Checkpoint at {PATH} does not have 'chars' key. Make sure you trained with MODEL_TYPE='character'")
 
+# Load character mappings
+chars = ckpt['chars']
+stoi = ckpt['stoi']
+itos = {int(k): v for k, v in ckpt['itos'].items()}
+vocab_size = ckpt['vocab_size']
 
-def _sync_vocab_from_checkpoint(path=None):
-    """Load stoi/itos/chars from the checkpoint and re-encode ``text`` for val batches."""
-    global chars, stoi, itos, vocab_size, encode, decode, data, train_data, val_data
-    path = path or PATH
-    ckpt = torch.load(path, map_location='cpu', weights_only=False)
-    chars = list(ckpt['chars'])
-    stoi = dict(ckpt['stoi'])
-    raw_itos = ckpt['itos']
-    itos = {int(k): v for k, v in raw_itos.items()}
-    vocab_size = int(ckpt['vocab_size'])
-
-    def _encode(s):
-        out = []
-        for c in s:
-            if c not in stoi:
-                raise ValueError(
-                    f"Character {c!r} is not in the model vocabulary (trained on Shakespeare chars)."
-                )
-            out.append(stoi[c])
-        return out
-
-    def _decode(indices):
-        return ''.join(itos[int(i)] for i in indices)
-
-    encode = _encode
-    decode = _decode
-    data = torch.tensor(encode(text), dtype=torch.long)
-    n = int(0.9 * len(data))
-    train_data = data[:n]
-    val_data = data[n:]
-
-
-_sync_vocab_from_checkpoint()
-
+# Hyperparameters (match training)
 batch_size = 16
-block_size = 32
+block_size = 128
 max_iters = 5000
 eval_interval = 100
-learning_rate = 1e-3
-device = 'cpu'
+learning_rate = 3e-4
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
 eval_iters = 200
-n_embd = 64
-n_head = 4
-n_layer = 4
-dropout = 0.0
+n_embd = 128
+n_head = 8
+n_layer = 8
+dropout = 0.1
 
+def encode(s):
+    return [stoi[c] for c in s if c in stoi]
 
-def get_batch(split):
-    data = train_data if split == 'train' else val_data
-    ix = torch.randint(len(data) - block_size, (batch_size,))
-    x = torch.stack([data[i:i + block_size] for i in ix])
-    y = torch.stack([data[i + 1:i + block_size + 1] for i in ix])
-    x, y = x.to(device), y.to(device)
-    return x, y
-
-
-def mask(tensor, T, C):
-    matrix = torch.zeros(1, T, C)
-    mask = torch.triu(torch.ones_like(matrix[0, :, :]), diagonal=1)
-    matrix.masked_fill_(mask.bool(), float('-inf'))
-    return tensor + matrix
-
+def decode(indices):
+    return ''.join([itos[int(i)] for i in indices])
 
 class Head(nn.Module):
-
     def __init__(self, head_size):
         super().__init__()
         self.key = nn.Linear(n_embd, head_size, bias=False)
         self.query = nn.Linear(n_embd, head_size, bias=False)
         self.value = nn.Linear(n_embd, head_size, bias=False)
         self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))
-
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x):
         B, T, C = x.shape
-
         k = self.key(x)
         q = self.query(x)
-        attention_score = q @ k.transpose(-2, -1) * C ** -0.5
+        attention_score = q @ k.transpose(-2, -1) * C**-0.5
         attention_score = attention_score.masked_fill(self.tril[:T, :T] == 0, float('-inf'))
         attention_score = F.softmax(attention_score, dim=-1)
         attention_score = self.dropout(attention_score)
-
         v = self.value(x)
-        attention = attention_score @ v
-        return attention
-
+        return attention_score @ v
 
 class MultiHeadAttention(nn.Module):
-
     def __init__(self, num_heads, head_size):
         super().__init__()
         self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
@@ -122,12 +69,9 @@ class MultiHeadAttention(nn.Module):
 
     def forward(self, x):
         out = torch.cat([h(x) for h in self.heads], dim=-1)
-        out = self.dropout(self.projection(out))
-        return out
-
+        return self.dropout(self.projection(out))
 
 class FeedFoward(nn.Module):
-
     def __init__(self, n_embd):
         super().__init__()
         self.net = nn.Sequential(
@@ -140,31 +84,27 @@ class FeedFoward(nn.Module):
     def forward(self, x):
         return self.net(x)
 
-
 class Block(nn.Module):
-
     def __init__(self, n_embd, n_head):
         super().__init__()
         head_size = n_embd // n_head
         self.mHA = MultiHeadAttention(n_head, head_size)
         self.ffwd = FeedFoward(n_embd)
-        self.linearLayer1 = nn.LayerNorm(n_embd)
-        self.linearLayer2 = nn.LayerNorm(n_embd)
+        self.ln1 = nn.LayerNorm(n_embd)
+        self.ln2 = nn.LayerNorm(n_embd)
 
     def forward(self, x):
-        x = x + self.mHA(self.linearLayer1(x))
-        x = x + self.ffwd(self.linearLayer2(x))
+        x = x + self.mHA(self.ln1(x))
+        x = x + self.ffwd(self.ln2(x))
         return x
 
-
 class DecodOnlyTransformer(nn.Module):
-
     def __init__(self):
         super().__init__()
         self.token_embedding = nn.Embedding(vocab_size, n_embd)
         self.position_embedding = nn.Embedding(block_size, n_embd)
         self.blocks = nn.Sequential(*[Block(n_embd, n_head=n_head) for _ in range(n_layer)])
-        self.layernorm_f = nn.LayerNorm(n_embd)
+        self.ln_f = nn.LayerNorm(n_embd)
         self.lm_head = nn.Linear(n_embd, vocab_size)
 
     def forward(self, token, targets=None):
@@ -172,31 +112,44 @@ class DecodOnlyTransformer(nn.Module):
         token_emb = self.token_embedding(token)
         position_emb = self.position_embedding(torch.arange(T, device=device))
         x = token_emb + position_emb
-
         x = self.blocks(x)
-        x = self.layernorm_f(x)
+        x = self.ln_f(x)
         logits = self.lm_head(x)
 
         if targets is None:
             loss = None
         else:
-            B, T, C = logits.shape
-            logits = logits.view(B * T, C)
-            targets = targets.view(B * T)
+            logits = logits.view(B*T, -1)
+            targets = targets.view(B*T)
             loss = F.cross_entropy(logits, targets)
-
         return logits, loss
 
     def generate(self, token, max_new_tokens):
         for _ in range(max_new_tokens):
             token_cond = token[:, -block_size:]
-            logits, loss = self(token_cond)
+            logits, _ = self(token_cond)
             logits = logits[:, -1, :]
             probs = F.softmax(logits, dim=-1)
             token_next = torch.multinomial(probs, num_samples=1)
             token = torch.cat((token, token_next), dim=1)
         return token
 
+def load_model():
+    checkpoint = torch.load(PATH, map_location=device, weights_only=False)
+    model = DecodOnlyTransformer()
+    model.load_state_dict(checkpoint['model_state_dict'])
+    model.to(device)
+    model.eval()
+    return model
+
+def generate_text(prompt="The", max_new_tokens=200):
+    model = load_model()
+    context_tokens = encode(prompt)
+    if not context_tokens:
+        return "Error: Prompt contains characters not in vocabulary"
+    context = torch.tensor([context_tokens], dtype=torch.long, device=device)
+    generated_indices = model.generate(context, max_new_tokens)[0].tolist()
+    return decode(generated_indices)
 
 def evaluate_model():
     checkpoint = torch.load(PATH, map_location=device, weights_only=False)
@@ -204,53 +157,33 @@ def evaluate_model():
     model.load_state_dict(checkpoint['model_state_dict'])
     model.to(device)
     model.eval()
-
+    
+    with open('/home/yon/Transformer/data/tinyshakespeare.txt', 'r', encoding='utf-8') as f:
+        text = f.read()
+    
+    tokens = encode(text)
+    data = torch.tensor(tokens, dtype=torch.long)
+    n = int(0.9 * len(data))
+    val_data = data[n:]
+    
+    def get_val_batch():
+        ix = torch.randint(len(val_data) - block_size, (batch_size,))
+        x = torch.stack([val_data[i:i+block_size] for i in ix])
+        y = torch.stack([val_data[i+1:i+block_size+1] for i in ix])
+        return x.to(device), y.to(device)
+    
     total_loss = 0
     total_tokens = 0
-    num_batches = 0
-
+    
     with torch.no_grad():
         for _ in range(100):
-            x, y = get_batch('val')
+            x, y = get_val_batch()
             logits, loss = model(x, y)
-
             if loss is not None:
                 total_loss += loss.item() * x.numel()
                 total_tokens += x.numel()
-                num_batches += 1
-
-    if total_tokens > 0:
-        avg_loss = total_loss / total_tokens
-        perplexity = math.exp(avg_loss)
-    else:
-        avg_loss = float('inf')
-        perplexity = float('inf')
-
-    print(f"Evaluation completed:")
-    print(f"Average Loss: {avg_loss:.4f}")
-    print(f"Perplexity: {perplexity:.4f}")
-
-    return {
-        'perplexity': perplexity,
-        'loss': avg_loss,
-        'note': f'Evaluated on {num_batches} batches, {total_tokens} tokens'
-    }
-
-
-def generate_text(prompt="The", max_new_tokens=200):
-    checkpoint = torch.load(PATH, map_location=device, weights_only=False)
-    model = DecodOnlyTransformer()
-    model.load_state_dict(checkpoint['model_state_dict'])
-    m = model.to(device)
-    m.eval()
-    print("Model loaded successfully.")
-
-    print(f"Starting prompt: '{prompt}'")
-    context_tokens = encode(prompt)
-    context = torch.tensor([context_tokens], dtype=torch.long, device=device)
-
-    print("Generating text...")
-    generated_indices = m.generate(context, max_new_tokens=max_new_tokens)[0].tolist()
-    output_text = decode(generated_indices)
-
-    return output_text
+    
+    avg_loss = total_loss / total_tokens if total_tokens > 0 else float('inf')
+    perplexity = math.exp(avg_loss)
+    
+    return {'perplexity': perplexity, 'loss': avg_loss}
